@@ -1,0 +1,17 @@
+{
+  "name": "placement-prep-server",
+  "version": "1.0.0",
+  "description": "Backend API for Placement Preparation & Developer Portfolio Dashboard",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch --watch-path=server.js --watch-path=routes --watch-path=services --watch-path=data/userStore.js server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "nodemailer": "^10.3.1"
+  }
+}

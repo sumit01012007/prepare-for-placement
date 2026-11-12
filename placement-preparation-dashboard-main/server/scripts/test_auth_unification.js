@@ -1,0 +1,308 @@
+const BASE_URL = 'http://localhost:5000';
+
+async function runTests() {
+  console.log('--- Starting Multi-Provider Authentication Unification Tests ---');
+  const testEmail = `candidate_${Date.now()}@example.com`;
+  const initialPassword = 'Password123!';
+  const customTargetRole = 'Backend Systems Specialist';
+  const customHandles = {
+    leetcode: 'tourist',
+    codeforces: 'tourist',
+    github: 'torvalds'
+  };
+
+  // 1. Register/Login via Email & Password
+  console.log('\n[Test 1] Register via Email/Password...');
+  const res1 = await fetch(`${BASE_URL}/api/auth/register-or-login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      email: testEmail,
+      name: 'Deep Candidate',
+      password: initialPassword,
+      targetRole: customTargetRole,
+      handles: customHandles,
+      provider: 'email'
+    })
+  });
+  const data1 = await res1.json();
+  console.log('Registration response status:', res1.status, 'Success:', data1.success);
+  console.log('Stored user handles:', data1.user?.handles);
+  console.log('Stored user role:', data1.user?.targetRole);
+
+  if (!data1.success || data1.user.handles?.leetcode !== 'tourist') {
+    throw new Error('Test 1 Failed: Registration did not set handles properly');
+  }
+
+  // 2. Explicit Profile Update (e.g. Settings change)
+  console.log('\n[Test 2] Update Profile in Settings...');
+  const res2 = await fetch(`${BASE_URL}/api/auth/profile`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      email: testEmail,
+      name: 'Deep Candidate (Updated)',
+      targetRole: 'Senior Distributed Systems Architect',
+      academic: {
+        college: 'Chandigarh University Institute of Engineering',
+        cgpa: '9.45 / 10',
+        year: '2026'
+      },
+      handles: {
+        leetcode: 'tourist',
+        codeforces: 'tourist',
+        github: 'torvalds'
+      },
+      phone: '+91 9876543210',
+      privacy: {
+        showEmail: true,
+        showPhone: true
+      }
+    })
+  });
+  const data2 = await res2.json();
+  console.log('Profile update response:', data2.success, data2.user?.academic?.cgpa);
+  if (!data2.success || data2.user?.academic?.cgpa !== '9.45 / 10') {
+    throw new Error('Test 2 Failed: Profile update failed');
+  }
+
+  // 3. User logs in via "Google" using the same email
+  // (In Google OAuth callback, provider='google', default role='Software Development Engineer (SDE-1)', handles empty)
+  console.log('\n[Test 3] Simulate Google OAuth login with same email...');
+  const { saveOrMergeUser, getUserByEmail } = await import('../data/userStore.js');
+
+  const existingBeforeGoogle = getUserByEmail(testEmail);
+  const googleUser = saveOrMergeUser({
+    id: 'google_1092837465',
+    name: 'Google User Profile Name',
+    email: testEmail,
+    targetRole: 'Software Development Engineer (SDE-1)', // Google callback default
+    provider: 'google',
+    avatarUrl: 'https://lh3.googleusercontent.com/a/test-avatar',
+    handles: {
+      leetcode: existingBeforeGoogle?.handles?.leetcode || '',
+      codeforces: existingBeforeGoogle?.handles?.codeforces || '',
+      github: existingBeforeGoogle?.handles?.github || ''
+    },
+    onboardingCompleted: true
+  });
+
+  console.log('After Google Login:');
+  console.log('  Target Role:', googleUser.targetRole, '(Expected: Senior Distributed Systems Architect)');
+  console.log('  CGPA:', googleUser.academic?.cgpa, '(Expected: 9.45 / 10)');
+  console.log('  LeetCode Handle:', googleUser.handles?.leetcode, '(Expected: tourist)');
+  console.log('  Providers:', googleUser.providers, '(Expected includes email and google)');
+
+  if (googleUser.targetRole !== 'Senior Distributed Systems Architect') {
+    throw new Error('Test 3 Failed: Google login overwrote targetRole');
+  }
+  if (googleUser.handles?.leetcode !== 'tourist') {
+    throw new Error('Test 3 Failed: Google login lost LeetCode handle');
+  }
+  if (googleUser.academic?.cgpa !== '9.45 / 10') {
+    throw new Error('Test 3 Failed: Google login lost CGPA');
+  }
+
+  // 4. User logs in via "GitHub" using the same email
+  // (In GitHub OAuth callback, provider='github', default role='Software Development Engineer (SDE-1)', ghUser.login='torvalds')
+  console.log('\n[Test 4] Simulate GitHub OAuth login with same email...');
+  const existingBeforeGithub = getUserByEmail(testEmail);
+  const githubUser = saveOrMergeUser({
+    id: 'gh_999888',
+    name: 'Linus Torvalds',
+    email: testEmail,
+    targetRole: existingBeforeGithub?.targetRole || 'Software Development Engineer (SDE-1)',
+    provider: 'github',
+    avatarUrl: 'https://github.com/torvalds.png',
+    handles: {
+      leetcode: existingBeforeGithub?.handles?.leetcode || '',
+      codeforces: existingBeforeGithub?.handles?.codeforces || '',
+      github: existingBeforeGithub?.handles?.github || 'torvalds'
+    },
+    onboardingCompleted: true
+  });
+
+  console.log('After GitHub Login:');
+  console.log('  Target Role:', githubUser.targetRole, '(Expected: Senior Distributed Systems Architect)');
+  console.log('  CGPA:', githubUser.academic?.cgpa, '(Expected: 9.45 / 10)');
+  console.log('  LeetCode Handle:', githubUser.handles?.leetcode, '(Expected: tourist)');
+  console.log('  GitHub Handle:', githubUser.handles?.github, '(Expected: torvalds)');
+  console.log('  Providers:', githubUser.providers, '(Expected includes email, google, and github)');
+
+  if (githubUser.targetRole !== 'Senior Distributed Systems Architect') {
+    throw new Error('Test 4 Failed: GitHub login overwrote targetRole');
+  }
+  if (githubUser.handles?.leetcode !== 'tourist' || githubUser.handles?.github !== 'torvalds') {
+    throw new Error('Test 4 Failed: GitHub login lost handles');
+  }
+
+  // 5. Test Backend Route Fallback Resolution with Email
+  console.log('\n[Test 5] Test Backend Route Hydration with email param only...');
+  const dsaRes = await fetch(`${BASE_URL}/api/dsa?email=${encodeURIComponent(testEmail)}`);
+  const dsaData = await dsaRes.json();
+  console.log('DSA API responded. Success:', dsaData.success);
+
+  const dashRes = await fetch(`${BASE_URL}/api/dashboard?email=${encodeURIComponent(testEmail)}`);
+  const dashData = await dashRes.json();
+  console.log('Dashboard API responded. Success:', dashData.success, 'Readiness score:', dashData.readiness?.overallScore);
+
+  const readRes = await fetch(`${BASE_URL}/api/readiness?email=${encodeURIComponent(testEmail)}`);
+  const readData = await readRes.json();
+  console.log('Readiness API responded. Success:', readData.success, 'Overall score:', readData.readiness?.overallScore);
+
+  // 6. Test Custom Weights Modification & Persistence across Login and API Routes
+  console.log('\n[Test 6] Test Custom Weights Update, Route Calibration & Sign-In Persistence...');
+  const customWeights = { dsa: 50, webDev: 20, systemDesign: 15, projects: 10, devActivity: 5, developerActivity: 5 };
+  const resWeights = await fetch(`${BASE_URL}/api/auth/profile`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      email: testEmail,
+      customWeights
+    })
+  });
+  const dataWeights = await resWeights.json();
+  console.log('Custom weights update response:', dataWeights.success, dataWeights.user?.customWeights);
+  if (!dataWeights.success || dataWeights.user?.customWeights?.dsa !== 50) {
+    throw new Error('Test 6 Failed: Custom weights not saved in profile');
+  }
+
+  // Check Dashboard route uses custom weights
+  const dashWeightsRes = await fetch(`${BASE_URL}/api/dashboard?email=${encodeURIComponent(testEmail)}`);
+  const dashWeightsData = await dashWeightsRes.json();
+  console.log('Dashboard API with custom weights:');
+  console.log('  DSA Weight:', dashWeightsData.readiness?.weights?.dsa, '(Expected: 50)');
+  console.log('  Sys Design Weight:', dashWeightsData.readiness?.weights?.systemDesign, '(Expected: 15)');
+  if (dashWeightsData.readiness?.weights?.dsa !== 50) {
+    throw new Error('Test 6 Failed: Dashboard route did not use saved custom weights');
+  }
+
+  // Check Readiness route uses custom weights
+  const readWeightsRes = await fetch(`${BASE_URL}/api/readiness?email=${encodeURIComponent(testEmail)}`);
+  const readWeightsData = await readWeightsRes.json();
+  console.log('Readiness API with custom weights:');
+  console.log('  DSA Weight:', readWeightsData.readiness?.weights?.dsa, '(Expected: 50)');
+  if (readWeightsData.readiness?.weights?.dsa !== 50) {
+    throw new Error('Test 6 Failed: Readiness route did not use saved custom weights');
+  }
+
+  // Simulate user logging in again later via Google OAuth
+  const nextSessionUser = saveOrMergeUser({
+    id: 'google_session_next_day',
+    name: 'Linus Torvalds',
+    email: testEmail,
+    provider: 'google'
+  });
+  console.log('User next login session:');
+  console.log('  Persistent DSA Weight:', nextSessionUser.customWeights?.dsa, '(Expected: 50)');
+  // [Test 7] Test Achievements & Extracurriculars Persistence & Public Dossier Sync
+  console.log('\n[Test 7] Test Achievements & Extracurriculars Persistence & Public Dossier Sync...');
+  const testAchievements = [
+    'Winner of HackCBS 6.0 among 400+ national engineering teams',
+    'Secured Global Rank 45 in LeetCode Weekly Contest 390'
+  ];
+  const testExtracurriculars = [
+    'Lead Organizer of Annual National Hackathon with 800+ attendees',
+    'Mentor for Data Structures & Algorithms Club (mentored 80+ juniors)'
+  ];
+
+  const testUsername = 'cand_' + Date.now();
+  const profileRes7 = await fetch(`${BASE_URL}/api/auth/profile`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      email: testEmail,
+      username: testUsername,
+      achievements: testAchievements,
+      extracurriculars: testExtracurriculars
+    })
+  });
+  const profileData7 = await profileRes7.json();
+  console.log('Achievements saved:', profileData7.user?.achievements?.length, '(Expected: 2)');
+  console.log('Extracurriculars saved:', profileData7.user?.extracurriculars?.length, '(Expected: 2)');
+  if (profileData7.user?.achievements?.length !== 2 || profileData7.user?.extracurriculars?.length !== 2) {
+    throw new Error('Test 7 Failed: Achievements or extracurriculars were not saved in profile update');
+  }
+
+  // Fetch public profile and verify presence of achievements and extracurriculars
+  const publicRes7 = await fetch(`${BASE_URL}/api/public/profile/${testUsername}`);
+  const publicData7 = await publicRes7.json();
+  console.log('Public Profile Achievements:', publicData7.profile?.achievements?.length, '(Expected: 2)');
+  console.log('Public Profile Extracurriculars:', publicData7.profile?.extracurriculars?.length, '(Expected: 2)');
+  if (publicData7.profile?.achievements?.length !== 2 || publicData7.profile?.extracurriculars?.length !== 2) {
+    throw new Error('Test 7 Failed: Public profile did not return saved achievements or extracurriculars');
+  }
+
+  // Verify next session OAuth login retains them
+  const nextSessionWithOAuth = saveOrMergeUser({
+    id: 'google_session_day_3',
+    name: 'Deep Google',
+    email: testEmail,
+    provider: 'google'
+  });
+  console.log('User next login achievements retained:', nextSessionWithOAuth.achievements?.length, '(Expected: 2)');
+  if (nextSessionWithOAuth.achievements?.length !== 2) {
+    throw new Error('Test 7 Failed: Subsequent OAuth login did not preserve achievements');
+  }
+
+  // 8. Test 10th/12th Education, Work Experience, Technical Skills, and Projects Selection
+  console.log('\n[Test 8] Test 10th/12th Education, Experience, Technical Skills, and Resume Projects Selection...');
+  const testClass12 = { school: 'Delhi Public School', board: 'CBSE', year: '2022', score: '95.4%' };
+  const testClass10 = { school: 'St. Xavier High School', board: 'ICSE', year: '2020', score: '96.8%' };
+  const testExperience = [
+    { id: 'exp_test_1', role: 'SDE Intern', company: 'Google', location: 'Bengaluru', duration: 'May 2024 -- July 2024', bullets: ['Built caching service'] }
+  ];
+  const testTechnicalSkills = {
+    languages: 'C++, Go, Python, TypeScript',
+    frameworks: 'React 19, Express, Node.js',
+    databases: 'PostgreSQL, Redis',
+    developerTools: 'Docker, Linux, Git',
+    coreConcepts: 'DSA, System Design'
+  };
+  const testProjects = [
+    { id: 'proj_custom_1', title: 'Raft KV Store', techStack: 'Go, gRPC', date: '2024', bullets: ['Implemented leader election'] }
+  ];
+  const testSelectedResumeProjectIds = ['proj_custom_1'];
+
+  const profileRes8 = await fetch(`${BASE_URL}/api/auth/profile`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      email: testEmail,
+      class12: testClass12,
+      class10: testClass10,
+      experience: testExperience,
+      technicalSkills: testTechnicalSkills,
+      projects: testProjects,
+      selectedResumeProjectIds: testSelectedResumeProjectIds
+    })
+  });
+  const profileData8 = await profileRes8.json();
+  console.log('Class 12 Score saved:', profileData8.user?.academic?.class12?.score, '(Expected: 95.4%)');
+  console.log('Class 10 Score saved:', profileData8.user?.academic?.class10?.score, '(Expected: 96.8%)');
+  console.log('Work Experience count:', profileData8.user?.experience?.length, '(Expected: 1)');
+  console.log('Technical Skills languages:', profileData8.user?.technicalSkills?.languages, '(Expected: C++, Go, Python, TypeScript)');
+  console.log('Selected Resume Project IDs:', profileData8.user?.selectedResumeProjectIds, '(Expected: ["proj_custom_1"])');
+
+  if (profileData8.user?.academic?.class12?.score !== '95.4%' || profileData8.user?.experience?.length !== 1) {
+    throw new Error('Test 8 Failed: Class 12 or Experience not persisted in user profile');
+  }
+
+  // Fetch Public Profile and verify new fields
+  const publicRes8 = await fetch(`${BASE_URL}/api/public/profile/${testUsername}`);
+  const publicData8 = await publicRes8.json();
+  console.log('Public Profile Class 12:', publicData8.profile?.class12?.school, '(Expected: Delhi Public School)');
+  console.log('Public Profile Experience:', publicData8.profile?.experience?.length, '(Expected: 1)');
+  console.log('Public Profile Selected Projects:', publicData8.profile?.selectedResumeProjectIds, '(Expected: ["proj_custom_1"])');
+
+  if (publicData8.profile?.class12?.school !== 'Delhi Public School' || publicData8.profile?.experience?.length !== 1) {
+    throw new Error('Test 8 Failed: Public profile did not return education or experience');
+  }
+
+  console.log('\n>>> ALL MULTI-PROVIDER AUTHENTICATION UNIFICATION & RESUME SECTION TESTS PASSED! <<<');
+}
+
+runTests().catch(err => {
+  console.error('\nXXX TEST FAILED:', err);
+  process.exit(1);
+});

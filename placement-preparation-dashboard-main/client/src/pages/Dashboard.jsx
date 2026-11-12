@@ -1,0 +1,220 @@
+import React, { useState } from 'react';
+import { 
+  Code2, 
+  Globe2, 
+  ServerCog, 
+  GitBranch, 
+  Sparkles, 
+  CheckCircle2, 
+  ArrowUpRight, 
+  Flame, 
+  TrendingUp,
+  Settings2,
+  RefreshCw,
+  Zap,
+  ArrowRight,
+  ShieldCheck,
+  Check
+} from 'lucide-react';
+import { MetricCard } from '../components/common/MetricCard';
+import { Badge } from '../components/common/Badge';
+import { DifficultyDistribution, DonutChart } from '../components/common/Charts';
+import { LoadingSkeleton } from '../components/common/LoadingSkeleton';
+import { RatingGraph } from '../components/dashboard/RatingGraph';
+import { PrimaryMetricCards } from '../components/dashboard/PrimaryMetricCards';
+import { PlacementSprintCard } from '../components/dashboard/PlacementSprintCard';
+import { SpacedRepetitionCard } from '../components/dashboard/SpacedRepetitionCard';
+import { HandleConfigModal } from '../components/dashboard/HandleConfigModal';
+import { useLocalCache } from '../hooks/useLocalCache';
+import { saveUserToRegistry } from '../utils/accountManager';
+
+export function Dashboard({ dashboardData, loading, onNavigate, onRefreshAll }) {
+  const [handles, setHandles] = useLocalCache('prep_user_handles', {
+    codeforces: '',
+    leetcode: '',
+    github: ''
+  });
+
+  const [authProfile] = useLocalCache('prep_auth_user', null);
+  const [showConfigModal, setShowConfigModal] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+
+  const applyHandles = async (newCf, newLc, newGh) => {
+    setSyncing(true);
+    const newHandles = { codeforces: newCf, leetcode: newLc, github: newGh };
+    setHandles(newHandles);
+
+    if (authProfile?.email) {
+      saveUserToRegistry({
+        ...authProfile,
+        handles: newHandles
+      }, true);
+      try {
+        fetch('/api/auth/profile', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: authProfile.email,
+            handles: newHandles
+          })
+        }).catch(() => {});
+      } catch (e) {
+        // offline fallback
+      }
+    }
+
+    if (onRefreshAll) await onRefreshAll();
+    setSyncing(false);
+  };
+
+  if (loading || !dashboardData) {
+    return (
+      <div className="space-y-6">
+        <LoadingSkeleton lines={4} />
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <LoadingSkeleton lines={3} />
+          <LoadingSkeleton lines={3} />
+          <LoadingSkeleton lines={3} />
+          <LoadingSkeleton lines={3} />
+        </div>
+      </div>
+    );
+  }
+
+  const { readiness, metrics, platforms, weakestArea, strongestArea, recommendations = [], dueRevisions = [] } = dashboardData;
+  const overallScore = readiness?.overallScore ?? 0;
+  const statusTier = readiness?.status || 'Keep Preparing';
+  const tierColor = readiness?.tierColor || 'amber';
+
+  const hasLinkedAccount = Boolean(handles.leetcode || handles.codeforces || handles.github);
+  const studentName = authProfile?.name || 'Student Developer';
+  const targetRole = authProfile?.targetRole || 'Software Development Engineer (SDE-1)';
+
+  const platformSolvesData = [
+    { label: 'LeetCode', value: platforms?.leetcode?.problemsSolved ?? 0, color: '#111827' },
+    { label: 'Codeforces', value: platforms?.codeforces?.problemsSolved ?? 0, color: '#f59e0b' },
+    { label: 'AtCoder', value: platforms?.atcoder?.problemsSolved ?? 0, color: '#10b981' },
+    { label: 'HackerRank', value: platforms?.hackerrank?.problemsSolved ?? 0, color: '#8b5cf6' }
+  ];
+
+  return (
+    <div className="space-y-6 animate-fadeIn font-sans antialiased text-gray-900">
+      
+      {/* 1. Sleek Modular Executive Top Bar */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 p-4 lg:p-5 rounded-2xl bg-white border border-gray-200/90 shadow-xs">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-gray-900">
+              Welcome back, {studentName}
+            </h1>
+            <span className="hidden sm:inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-semibold uppercase tracking-wider">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              Live Synced
+            </span>
+          </div>
+          <p className="text-xs text-gray-500 font-normal flex items-center gap-2">
+            <span>Target Goal:</span>
+            <span className="text-gray-900 font-medium bg-gray-100 px-2 py-0.5 rounded-md text-[11px]">
+              {targetRole}
+            </span>
+          </p>
+        </div>
+
+        {/* Compact Handle Status Strip */}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-1.5 text-xs font-mono">
+            {/* LeetCode Pill */}
+            <span className={`px-2.5 py-1 rounded-lg border text-xs flex items-center gap-1.5 ${
+              handles.leetcode 
+                ? 'bg-gray-50 border-gray-200 text-gray-900 font-semibold' 
+                : 'bg-gray-50/50 border-gray-200/60 text-gray-400'
+            }`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${handles.leetcode ? 'bg-amber-500' : 'bg-gray-300'}`} />
+              LC: {handles.leetcode ? `@${handles.leetcode}` : 'Unlinked'}
+            </span>
+
+            {/* Codeforces Pill */}
+            <span className={`px-2.5 py-1 rounded-lg border text-xs flex items-center gap-1.5 ${
+              handles.codeforces 
+                ? 'bg-gray-50 border-gray-200 text-gray-900 font-semibold' 
+                : 'bg-gray-50/50 border-gray-200/60 text-gray-400'
+            }`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${handles.codeforces ? 'bg-blue-500' : 'bg-gray-300'}`} />
+              CF: {handles.codeforces ? `@${handles.codeforces}` : 'Unlinked'}
+            </span>
+
+            {/* GitHub Pill */}
+            <span className={`px-2.5 py-1 rounded-lg border text-xs flex items-center gap-1.5 ${
+              handles.github 
+                ? 'bg-gray-50 border-gray-200 text-gray-900 font-semibold' 
+                : 'bg-gray-50/50 border-gray-200/60 text-gray-400'
+            }`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${handles.github ? 'bg-black' : 'bg-gray-300'}`} />
+              GH: {handles.github ? `@${handles.github}` : 'Unlinked'}
+            </span>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setShowConfigModal(true)}
+            className="p-1.5 sm:px-3 sm:py-1.5 rounded-xl bg-gray-100 hover:bg-gray-200/80 text-gray-800 text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
+            title="Configure competitive coding handles"
+          >
+            <Settings2 className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Edit Handles</span>
+          </button>
+        </div>
+      </div>
+
+      {/* 2. Four Primary KPI Metric Cards (Refined Modern SaaS) */}
+      <PrimaryMetricCards
+        overallScore={overallScore}
+        statusTier={statusTier}
+        metrics={metrics}
+        calibratedRole={{
+          ...readiness?.calibratedRole,
+          weights: authProfile?.customWeights || readiness?.calibratedRole?.weights
+        }}
+        onNavigate={onNavigate}
+      />
+
+      {/* 3. Competitive Rating Trajectory Chart (Codeforces + LeetCode Graph) */}
+      <RatingGraph 
+        codeforcesData={platforms?.codeforces} 
+        leetcodeData={platforms?.leetcode}
+        userHandles={handles}
+      />
+
+      {/* 4. Two-Column Modular Workspace: Action vs Retention */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* Left Column: Weak Area Engine & Placement Sprint (7 Cols) */}
+        <div className="lg:col-span-7">
+          <PlacementSprintCard
+            weakestArea={weakestArea}
+            strongestArea={strongestArea}
+            recommendations={recommendations}
+            onNavigate={onNavigate}
+          />
+        </div>
+
+        {/* Right Column: Spaced Repetition Due Queue & Difficulty Mix (5 Cols) */}
+        <div className="lg:col-span-5">
+          <SpacedRepetitionCard
+            dueRevisions={dueRevisions}
+            metrics={metrics}
+            onNavigate={onNavigate}
+          />
+        </div>
+      </div>
+
+      {/* Handle Configuration Modal */}
+      <HandleConfigModal
+        isOpen={showConfigModal}
+        onClose={() => setShowConfigModal(false)}
+        handles={handles}
+        onApplyHandles={applyHandles}
+        syncing={syncing}
+      />
+    </div>
+  );
+}
